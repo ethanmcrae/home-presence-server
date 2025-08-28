@@ -24,7 +24,7 @@ router.put("/:mac", (req, res) => {
   if (!mac) return res.status(400).json({ error: "Invalid MAC format" });
   const { label } = req.body ?? {};
   if (!isValidLabel(label)) return res.status(400).json({ error: "Invalid label" });
-  const device = upsertDevice(mac, label);
+  const device = upsertDevice(mac, { label });
   res.json(device);
 });
 
@@ -34,7 +34,7 @@ router.post("/", (req, res) => {
   const mac = normalizeMac(rawMac);
   if (!mac) return res.status(400).json({ error: "Invalid MAC format" });
   if (!isValidLabel(label)) return res.status(400).json({ error: "Invalid label" });
-  const device = upsertDevice(mac, label);
+  const device = upsertDevice(mac, { label });
   res.status(201).json(device);
 });
 
