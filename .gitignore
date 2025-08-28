@@ -29,3 +29,6 @@ logs
 
 # Coverage output
 coverage/
+
+# Sensitive database
+data/

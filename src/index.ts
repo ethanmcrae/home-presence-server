@@ -1,6 +1,8 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import devicesRouter from "./routes/devices";
+import ownersRouter from "./routes/owners";
 import { getPresenceSnapshot } from "./presence";
 
 dotenv.config();
@@ -9,13 +11,14 @@ const app = express();
 const port = process.env.PORT || 4000;
 
 app.use(cors());
+app.use(express.json());
 
-// Simple healthcheck
+// Healthcheck
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-// Presence endpoint
+// Presence endpoint (yours)
 app.get("/api/presence", async (_req, res) => {
   try {
     const snapshot = await getPresenceSnapshot();
@@ -25,6 +28,12 @@ app.get("/api/presence", async (_req, res) => {
     res.status(500).json({ error: err.message || "Failed to get snapshot" });
   }
 });
+
+// Devices API
+app.use("/api/devices", devicesRouter);
+
+// Owners API
+app.use("/api/owners", ownersRouter);
 
 app.listen(port, () => {
   console.log(`home-presence-server listening on http://localhost:${port}`);
