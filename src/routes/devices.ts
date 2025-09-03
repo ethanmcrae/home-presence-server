@@ -22,9 +22,25 @@ router.get("/:mac", (req, res) => {
 router.put("/:mac", (req, res) => {
   const mac = normalizeMac(req.params.mac);
   if (!mac) return res.status(400).json({ error: "Invalid MAC format" });
-  const { label } = req.body ?? {};
-  if (!isValidLabel(label)) return res.status(400).json({ error: "Invalid label" });
-  const device = upsertDevice(mac, { label });
+
+  // build args conditionally so undefined keys are not passed
+  const body = req.body ?? {};
+  const args: {
+    label?: string | null;
+    band?: string | null;
+    ip?: string | null;
+    ownerId?: number | null;
+    presenceType?: 1 | 2 | null;
+  } = {};
+
+  if (Object.prototype.hasOwnProperty.call(body, "label")) args.label = body.label;
+  if (Object.prototype.hasOwnProperty.call(body, "band")) args.band = body.band;
+  if (Object.prototype.hasOwnProperty.call(body, "ip")) args.ip = body.ip;
+  if (Object.prototype.hasOwnProperty.call(body, "ownerId")) args.ownerId = body.ownerId;
+  if (Object.prototype.hasOwnProperty.call(body, "presenceType")) args.presenceType = body.presenceType;
+
+  const device = upsertDevice(mac, args);
+  if (!device) return res.status(404).json({ error: "Not found" });
   res.json(device);
 });
 

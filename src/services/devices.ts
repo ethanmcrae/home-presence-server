@@ -1,40 +1,44 @@
+// src/services/devices.ts
 import { db } from "../db/sqlite";
 import { normalizeMac } from "../utils/mac";
 import type { Device } from "../../types/devices";
+import { normalizeOptionalText, normalizePresenceType } from "../utils/objects";
 
 const listStmt = db.prepare(`
-  SELECT d.mac, d.label, d.owner_id AS ownerId, o.name AS ownerName
+  SELECT d.mac, d.label, d.band, d.ip, d.owner_id AS ownerId, d.presence_type AS presenceType
   FROM devices d
-  LEFT JOIN device_owners o ON o.id = d.owner_id
   ORDER BY d.mac
 `);
+
 const getStmt = db.prepare(`
-  SELECT d.mac, d.label, d.owner_id AS ownerId, o.name AS ownerName
+  SELECT d.mac, d.label, d.band, d.ip, d.owner_id AS ownerId, d.presence_type AS presenceType
   FROM devices d
-  LEFT JOIN device_owners o ON o.id = d.owner_id
   WHERE d.mac = ?
 `);
-// Upserts
-const upsertOwnerOnlyStmt = db.prepare(`
-  INSERT INTO devices (mac, owner_id)
-  VALUES (?, ?)
-  ON CONFLICT(mac) DO UPDATE SET owner_id = excluded.owner_id
-`);
-const upsertLabelOnlyStmt = db.prepare(`
-  INSERT INTO devices (mac, label)
-  VALUES (?, ?)
-  ON CONFLICT(mac) DO UPDATE SET label = excluded.label
-`);
-const upsertBothStmt = db.prepare(`
-  INSERT INTO devices (mac, label, owner_id)
-  VALUES (?, ?, ?)
-  ON CONFLICT(mac) DO UPDATE SET
-    label = excluded.label,
-    owner_id = excluded.owner_id
-`);
-const deleteStmt = db.prepare(`DELETE FROM devices WHERE mac = ?`);
-const setOwnerStmt = db.prepare(`UPDATE devices SET owner_id = ? WHERE mac = ?`);
+
 const ensureRowStmt = db.prepare(`INSERT OR IGNORE INTO devices (mac) VALUES (?)`);
+const updateLabelStmt = db.prepare(`UPDATE devices SET label = ? WHERE mac = ?`);
+const updateBandStmt = db.prepare(`UPDATE devices SET band  = ? WHERE mac = ?`);
+const updateIpStmt = db.prepare(`UPDATE devices SET ip    = ? WHERE mac = ?`);
+const setOwnerStmt = db.prepare(`UPDATE devices SET owner_id = ? WHERE mac = ?`);
+const updatePresenceTypeStmt = db.prepare(`UPDATE devices SET presence_type = ? WHERE mac = ?`);
+const deleteStmt = db.prepare(`DELETE FROM devices WHERE mac = ?`);
+
+const upsertTx = db.transaction((mac: string, fields: {
+  label?: string | null;
+  band?: string | null;
+  ip?: string | null;
+  ownerId?: number | null;
+  presenceType?: 1 | 2 | null;
+}) => {
+  ensureRowStmt.run(mac);
+
+  if (fields.label !== undefined) updateLabelStmt.run(fields.label, mac);
+  if (fields.band !== undefined) updateBandStmt.run(fields.band, mac);
+  if (fields.ip !== undefined) updateIpStmt.run(fields.ip, mac);
+  if (fields.ownerId !== undefined) setOwnerStmt.run(fields.ownerId, mac);
+  if (fields.presenceType !== undefined) updatePresenceTypeStmt.run(fields.presenceType, mac);
+});
 
 export function listDevices(): Device[] {
   return listStmt.all() as Device[];
@@ -49,27 +53,34 @@ export function getDevice(rawMac: string): Device | null {
 
 export function upsertDevice(
   rawMac: string,
-  args: { label?: string | null; ownerId?: number | null } = {}
+  args: { label?: string | null; band?: string | null; ip?: string | null; ownerId?: number | null; presenceType?: 1 | 2 | null } = {}
 ): Device | null {
   const mac = normalizeMac(rawMac);
   if (!mac) return null;
 
-  const hasLabel = Object.prototype.hasOwnProperty.call(args, "label");
-  const hasOwner = Object.prototype.hasOwnProperty.call(args, "ownerId");
+  const label = normalizeOptionalText(args.label);
+  const band = normalizeOptionalText(args.band);
+  const ip = normalizeOptionalText(args.ip);
 
-  const label = hasLabel ? (args.label?.trim() || null) : undefined;
-  const ownerId = hasOwner ? (args.ownerId ?? null) : undefined;
+  // Only update owner when provided AND not undefined (null is allowed to clear)
+  const ownerProvided = Object.prototype.hasOwnProperty.call(args, "ownerId") && args.ownerId !== undefined;
+  // const ownerId = ownerProvided ? (args.ownerId ?? null) : undefined;
 
-  if (hasLabel && hasOwner) {
-    upsertBothStmt.run(mac, label, ownerId);
-  } else if (hasLabel) {
-    upsertLabelOnlyStmt.run(mac, label);
-  } else if (hasOwner) {
-    upsertOwnerOnlyStmt.run(mac, ownerId);
-  } else {
-    ensureRowStmt.run(mac);
-  }
+  upsertTx(mac, {
+    label: normalizeOptionalText(args.label),
+    band: normalizeOptionalText(args.band),
+    ip: normalizeOptionalText(args.ip),
+    ownerId: Object.prototype.hasOwnProperty.call(args, "ownerId") ? (args.ownerId ?? null) : undefined,
+    presenceType: normalizePresenceType(args.presenceType),
+  });
 
+  return getStmt.get(mac) as Device;
+}
+
+export function setDeviceOwner(rawMac: string, ownerId: number | null): Device | null {
+  const mac = normalizeMac(rawMac);
+  if (!mac) return null;
+  upsertTx(mac, { ownerId });
   return getStmt.get(mac) as Device;
 }
 
@@ -78,11 +89,4 @@ export function deleteDevice(rawMac: string): boolean {
   if (!mac) return false;
   const info = deleteStmt.run(mac);
   return info.changes > 0;
-}
-
-export function setDeviceOwner(rawMac: string, ownerId: number | null): Device | null {
-  const mac = normalizeMac(rawMac);
-  if (!mac) return null;
-  upsertOwnerOnlyStmt.run(mac, ownerId);
-  return getStmt.get(mac) as Device;
 }
